@@ -1,0 +1,19 @@
+{
+  "name": "pazthrivingtribe-backend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node api-dev-server.js",
+    "start": "node api-dev-server.js",
+    "check": "node --check api/[...path].js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.106.2",
+    "libphonenumber-js": "^1.13.12",
+    "svix": "^2.6.0"
+  }
+}
