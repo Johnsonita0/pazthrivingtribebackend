@@ -1,5 +1,8 @@
 import { buildPazEmailTemplate } from './paz-email-template.js';
 
+let footerSettingsCache = null;
+let footerSettingsCacheExpiresAt = 0;
+
 function normalizeRecipients(recipients) {
   const list = (Array.isArray(recipients) ? recipients : [recipients])
     .filter(Boolean)
@@ -30,7 +33,7 @@ export async function sendResendEmail({
     throw new Error('No valid recipients available after filtering blocked addresses.');
   }
 
-  const brandedHtml = ensureBrandedHtml({ html, subject, text });
+  const brandedHtml = await applyFooterSettings(ensureBrandedHtml({ html, subject, text }));
 
   const normalizedAttachments = await Promise.all((attachments || []).map(async (attachment) => {
     if (!attachment) return null;
@@ -102,6 +105,97 @@ export async function sendResendEmail({
   }
 
   return responseBody;
+}
+
+async function applyFooterSettings(html) {
+  if (!html || !html.includes('data-paz-footer-note="true"')) return html;
+  const now = Date.now();
+  if (footerSettingsCacheExpiresAt > now) {
+    return replaceEmailFooterSettings(html, footerSettingsCache);
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) {
+    console.warn('Email footer settings were not loaded because Supabase server credentials are unavailable.');
+    return html;
+  }
+
+  try {
+    const response = await fetch(`${supabaseUrl.replace(/\/$/, '')}/rest/v1/tribe_site_settings?setting_key=eq.footer&select=setting_value&limit=1`, {
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Supabase returned status ${response.status}`);
+    }
+
+    const rows = await response.json();
+    const value = Array.isArray(rows) ? rows[0]?.setting_value : null;
+    footerSettingsCache = value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+    footerSettingsCacheExpiresAt = now + 30_000;
+    return replaceEmailFooterSettings(html, footerSettingsCache);
+  } catch (error) {
+    console.error('Failed to load shared footer settings for email:', error);
+    footerSettingsCache = null;
+    footerSettingsCacheExpiresAt = now + 5_000;
+    return html;
+  }
+}
+
+function replaceEmailFooterSettings(html, settings) {
+  if (!settings) return html;
+  const escapeHtml = (value) => String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+  const note = typeof settings.emailFooterNote === 'string' && settings.emailFooterNote.trim()
+    ? settings.emailFooterNote.trim()
+    : '';
+  const email = typeof settings.contactEmail === 'string' && settings.contactEmail.trim()
+    ? settings.contactEmail.trim()
+    : '';
+  const phone = typeof settings.contactPhone === 'string' && settings.contactPhone.trim()
+    ? settings.contactPhone.trim()
+    : '';
+  const brandName = typeof settings.brandName === 'string' && settings.brandName.trim()
+    ? settings.brandName.trim()
+    : '';
+  let updated = html;
+
+  if (brandName) {
+    updated = updated.replace(
+      /<div data-paz-footer-brand="true"[^>]*>[\s\S]*?<\/div>/,
+      (match) => match.replace(/>[\s\S]*<\/div>$/, `>${escapeHtml(brandName)}</div>`)
+    );
+  }
+  if (note) {
+    updated = updated.replace(
+      /<div data-paz-footer-note="true">[\s\S]*?<\/div>/,
+      `<div data-paz-footer-note="true">${escapeHtml(note)}</div>`
+    );
+  }
+  if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    updated = updated.replace(
+      /<div data-paz-footer-contact="true">[\s\S]*?<\/div>/,
+      (match) => match.replace(/mailto:[^"]+/, `mailto:${escapeHtml(email)}`).replace(/>[^<]+<\/a>/, `>${escapeHtml(email)}</a>`)
+    );
+  }
+  if (phone) {
+    const digits = phone.replace(/\D/g, '');
+    const internationalDigits = digits.startsWith('0') ? `234${digits.slice(1)}` : digits;
+    if (internationalDigits) {
+      updated = updated.replace(
+        /<div data-paz-footer-contact="true">[\s\S]*?<\/div>/,
+        (match) => match.replace(/https:\/\/wa\.me\/\d+/, `https://wa.me/${internationalDigits}`).replace(/>[^<]+<\/a><\/div>$/, `>${escapeHtml(phone)}</a></div>`)
+      );
+    }
+  }
+  return updated;
 }
 
 function ensureBrandedHtml({ html, subject, text }) {

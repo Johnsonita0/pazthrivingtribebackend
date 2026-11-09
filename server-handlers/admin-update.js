@@ -3,6 +3,7 @@ import { sendResendEmail } from './lib/resend.js'
 import { buildPazEmailTemplate } from './lib/paz-email-template.js'
 import { decryptProductChatToken, normalizeEmail, sendProductChatEmail } from './lib/product-chat.js'
 import { sendCustomerChatPush } from './lib/expo-push.js'
+import { createR2DownloadUrl } from './lib/r2-storage.js'
 
 // Serverless admin endpoint for secure updates using the Supabase service role key.
 // Requires these environment variables to be set in your deployment:
@@ -98,7 +99,56 @@ export default async function handler(req, res) {
 
     let result
     try {
-      if (action === 'delete_test_shop_orders') {
+      if (action === 'list_masterclass_registrations') {
+        const { data, error } = await supabase
+          .from('masterclass_registrations')
+          .select('id,registrant_name,email,phone,event_key,created_at')
+          .eq('event_key', 'parent-communication-2026-11-21')
+          .order('created_at', { ascending: false })
+          .limit(500)
+        if (error) throw error
+        return jsonResponse(res, 200, { data: data || [] })
+      } else if (action === 'save_footer_settings') {
+        const values = requestBody?.payload
+        if (!values || typeof values !== 'object' || Array.isArray(values)) {
+          return jsonResponse(res, 400, { error: 'Footer settings are required' })
+        }
+
+        const fields = {
+          brandName: 100,
+          description: 1200,
+          contactEmail: 254,
+          contactPhone: 50,
+          location: 180,
+          copyright: 180,
+          emailFooterNote: 500,
+        }
+        const footerSettings = {}
+        for (const [field, maxLength] of Object.entries(fields)) {
+          const value = typeof values[field] === 'string' ? values[field].trim() : ''
+          if (!value || value.length > maxLength) {
+            return jsonResponse(res, 400, { error: `${field} must contain 1 to ${maxLength} characters` })
+          }
+          footerSettings[field] = value
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(footerSettings.contactEmail)) {
+          return jsonResponse(res, 400, { error: 'Contact email is invalid' })
+        }
+        if (typeof values.enabled !== 'boolean') {
+          return jsonResponse(res, 400, { error: 'Footer visibility setting is invalid' })
+        }
+        footerSettings.enabled = values.enabled
+
+        const { error } = await supabase
+          .from('tribe_site_settings')
+          .upsert({
+            setting_key: 'footer',
+            setting_value: footerSettings,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'setting_key' })
+        if (error) throw error
+        return jsonResponse(res, 200, { data: footerSettings })
+      } else if (action === 'delete_test_shop_orders') {
         result = await supabase.from('shop_orders').delete().eq('payment_mode', 'test')
       } else if (action === 'update_shop_order_tracking') {
         const trackingStatuses = ['order_placed', 'processing', 'dispatched', 'out_for_delivery', 'delivered', 'cancelled']
@@ -452,6 +502,10 @@ export default async function handler(req, res) {
         if (productError) throw productError
         if (!product?.file_url) return jsonResponse(res, 404, { error: 'This product has no book attachment' })
         const rawPath = String(product.file_url).trim()
+        if (rawPath.startsWith('r2://')) {
+          const signedUrl = await createR2DownloadUrl(rawPath.slice('r2://'.length), 3600)
+          return jsonResponse(res, 200, { signedUrl })
+        }
         const storagePath = rawPath.replace(/^https?:\/\/[^/]+\/storage\/v1\/object\/(?:sign|authenticated|public)\/product-files\//i, '').replace(/^\/+/, '')
         const signedUrlResult = await supabase.storage.from('product-files').createSignedUrl(storagePath, 3600)
         if (signedUrlResult.error) return jsonResponse(res, 404, { error: `Book preview unavailable: ${signedUrlResult.error.message || signedUrlResult.error}` })

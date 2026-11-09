@@ -24,6 +24,12 @@ export function buildPazEmailTemplate({
   const safeAccentText = accentText ? String(accentText) : '';
   const safeProductName = String(productName || 'your product');
   const safeProductDownloadUrl = String(productDownloadUrl || '').trim();
+  const safeFooterNote = String(footerNote || 'We are here to help your growth journey.')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 
   return `
     <!DOCTYPE html>
@@ -93,9 +99,9 @@ export function buildPazEmailTemplate({
                       <a href="https://www.linkedin.com/company/pazthrivingtribe" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn" style="display:inline-block;width:34px;height:34px;line-height:34px;text-align:center;background:#344f47;border:1px solid #55746a;border-radius:50%;margin:0 6px;vertical-align:middle;text-decoration:none;color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:900;">in</a>
                     </div>
                     <div style="font-size:12px;line-height:1.8;color:#dfeeea;">
-                      <div style="font-size:14px;font-weight:800;color:#f7d980;margin-bottom:4px;">PAZ Thriving Tribe</div>
-                      <div>${footerNote}</div>
-                      <div>Email: <a href="mailto:pazthrivingtribe@gmail.com" style="color:#f7d980;text-decoration:none;">pazthrivingtribe@gmail.com</a> | WhatsApp: <a href="${whatsappUrl}" style="color:#f7d980;text-decoration:none;">${contactPhone}</a></div>
+                      <div data-paz-footer-brand="true" style="font-size:14px;font-weight:800;color:#f7d980;margin-bottom:4px;">PAZ Thriving Tribe</div>
+                      <div data-paz-footer-note="true">${safeFooterNote}</div>
+                      <div data-paz-footer-contact="true">Email: <a href="mailto:pazthrivingtribe@gmail.com" style="color:#f7d980;text-decoration:none;">pazthrivingtribe@gmail.com</a> | WhatsApp: <a href="${whatsappUrl}" style="color:#f7d980;text-decoration:none;">${contactPhone}</a></div>
                       <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:14px auto 0;border-collapse:separate;border-spacing:0;">
                         <tr>
                           <td style="background:#f7d980;border-radius:7px;text-align:center;">
@@ -114,4 +120,3 @@ export function buildPazEmailTemplate({
     </html>
   `;
 }
-

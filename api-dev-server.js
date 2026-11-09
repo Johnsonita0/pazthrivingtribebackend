@@ -34,6 +34,7 @@ import activityNotificationHandler from './server-handlers/activity-notification
 import testimonialSubmissionHandler from './server-handlers/testimonial-submission.js';
 import generateProductDescriptionHandler from './server-handlers/generate-product-description.js';
 import mentorShopOrderHandler from './server-handlers/mentor-shop-order.js';
+import mentorChatHandler from './server-handlers/mentor-chat.js';
 import productReleaseNotificationHandler from './server-handlers/product-release-notification.js';
 import productMetricsHandler from './server-handlers/product-metrics.js';
 import productRatingsHandler from './server-handlers/product-ratings.js';
@@ -42,11 +43,29 @@ import productChatHandler from './server-handlers/product-chat.js';
 import vendorProductChatHandler from './server-handlers/vendor-product-chat.js';
 import resendInboundHandler from './server-handlers/resend-inbound.js';
 import appDownloadHandler from './server-handlers/app-download.js';
+import r2StorageUploadHandler from './server-handlers/r2-storage-upload.js';
+import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 
-try {
-  process.loadEnvFile?.('.env');
-} catch (error) {
-  // Local development can still use explicitly configured environment variables.
+const envFilePath = ['.env.local', '.env']
+  .map((fileName) => fileURLToPath(new URL(fileName, import.meta.url)))
+  .find((filePath) => existsSync(filePath));
+if (envFilePath) {
+  if (typeof process.loadEnvFile !== 'function') {
+    console.error('Cannot load the backend environment file: use Node.js 20.12 or newer, or configure the backend environment variables directly.');
+    process.exit(1);
+  }
+
+  try {
+    process.loadEnvFile(envFilePath);
+  } catch (error) {
+    console.error(`Cannot load the backend environment file: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+if (!process.env.OPENAI_API_KEY) {
+  console.warn('OPENAI_API_KEY is not available to the local API server; Mentor Charles chat will be unavailable.');
 }
 
 const PORT = 3001;
@@ -79,6 +98,12 @@ const server = http.createServer((req, res) => {
       if (pathname === '/api/admin-update' && req.method === 'POST') {
         req.body = body;
         await adminUpdateHandler(req, res);
+        return;
+      }
+
+      if (pathname === '/api/r2-storage-upload' && req.method === 'POST') {
+        req.body = body;
+        await r2StorageUploadHandler(req, res);
         return;
       }
 
@@ -195,6 +220,12 @@ const server = http.createServer((req, res) => {
       if (pathname === '/api/mentor-shop-order' && req.method === 'POST') {
         req.body = body ? JSON.parse(body) : {};
         await mentorShopOrderHandler(req, res);
+        return;
+      }
+
+      if (pathname === '/api/mentor-chat' && req.method === 'POST') {
+        req.body = body ? JSON.parse(body) : {};
+        await mentorChatHandler(req, res);
         return;
       }
 
@@ -340,6 +371,15 @@ const server = http.createServer((req, res) => {
       res.end(JSON.stringify({ error: 'Internal server error' }));
     }
   });
+});
+
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(`Cannot start the local API: port ${PORT} is already in use. Stop the other API server and run "npm run dev" again.`);
+  } else {
+    console.error('Cannot start the local API server:', error);
+  }
+  process.exitCode = 1;
 });
 
 server.listen(PORT, () => {

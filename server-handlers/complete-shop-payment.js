@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { sendResendEmail } from './lib/resend.js';
 import { buildPazEmailTemplate } from './lib/paz-email-template.js';
 import { getProductAvailability } from './lib/productAvailability.js';
+import { downloadR2Object } from './lib/r2-storage.js';
 
 function sendJson(res, statusCode, payload) {
   if (typeof res.status === 'function') return res.status(statusCode).json(payload);
@@ -309,6 +310,16 @@ export default async function handler(req, res) {
       const sourceFilename = filePath.split('?')[0].split('/').pop() || '';
       const extensionMatch = sourceFilename.match(/(\.[a-z0-9]{1,8})$/i);
       const productFilename = `${safeFilename(item.product.title, 'product-file')}${extensionMatch ? extensionMatch[1].toLowerCase() : ''}`;
+      if (filePath.startsWith('r2://')) {
+        try {
+          const buffer = await downloadR2Object(filePath.slice('r2://'.length));
+          attachments.push({ filename: productFilename, content: buffer.toString('base64') });
+        } catch (fileError) {
+          console.warn(`R2 product file unavailable for ${item.product.title}:`, fileError.message);
+          missingFiles.push(item.product.title || 'Untitled product');
+        }
+        continue;
+      }
       if (/^https?:\/\//i.test(filePath)) {
         fileResponse = await fetch(filePath);
       } else {
