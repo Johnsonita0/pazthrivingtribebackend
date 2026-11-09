@@ -99,7 +99,93 @@ export default async function handler(req, res) {
 
     let result
     try {
-      if (action === 'list_masterclass_registrations') {
+      if (action === 'send_masterclass_meet_link') {
+        const meetLink = String(requestBody?.meetLink || '').trim()
+        const subject = String(requestBody?.subject || '').trim()
+        const emailTemplate = String(requestBody?.emailTemplate || '').trim()
+        let parsedMeetLink
+        try {
+          parsedMeetLink = new URL(meetLink)
+        } catch {
+          return jsonResponse(res, 400, { error: 'Enter a valid Google Meet link.' })
+        }
+        if (parsedMeetLink.protocol !== 'https:' || parsedMeetLink.hostname !== 'meet.google.com' || parsedMeetLink.pathname === '/') {
+          return jsonResponse(res, 400, { error: 'The meeting link must be a valid https://meet.google.com/ link.' })
+        }
+        if (!subject || subject.length > 200 || /[\r\n]/.test(subject)) {
+          return jsonResponse(res, 400, { error: 'The email subject must contain 1 to 200 characters.' })
+        }
+        if (!emailTemplate || emailTemplate.length > 5000) {
+          return jsonResponse(res, 400, { error: 'The email template must contain 1 to 5000 characters.' })
+        }
+        if (!emailTemplate.includes('{{name}}') || !emailTemplate.includes('{{meetLink}}')) {
+          return jsonResponse(res, 400, { error: 'Keep both {{name}} and {{meetLink}} in the email template.' })
+        }
+
+        const { data: registrations, error } = await supabase
+          .from('masterclass_registrations')
+          .select('registrant_name,email')
+          .eq('event_key', 'parent-communication-2026-11-21')
+          .order('created_at', { ascending: false })
+          .limit(500)
+        if (error) throw error
+
+        const recipientsByEmail = new Map()
+        for (const registration of registrations || []) {
+          const email = String(registration.email || '').trim().toLowerCase()
+          if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && !recipientsByEmail.has(email)) {
+            recipientsByEmail.set(email, String(registration.registrant_name || 'there').trim() || 'there')
+          }
+        }
+        const recipients = [...recipientsByEmail.entries()]
+        if (!recipients.length) return jsonResponse(res, 400, { error: 'There are no valid registrant email addresses to send to.' })
+
+        let sent = 0
+        const failures = []
+        for (let index = 0; index < recipients.length; index += 5) {
+          const batch = recipients.slice(index, index + 5)
+          const outcomes = await Promise.all(batch.map(async ([email, name]) => {
+            const personalizedText = emailTemplate
+              .replace(/\{\{name\}\}/g, name)
+              .replace(/\{\{meetLink\}\}/g, meetLink)
+            const personalizedHtml = emailTemplate
+              .split(/\r?\n/)
+              .map((line) => `<p>${escapeHtml(line)
+                .replace(/\{\{name\}\}/g, escapeHtml(name))
+                .replace(/\{\{meetLink\}\}/g, `<a href="${escapeHtml(meetLink)}">${escapeHtml(meetLink)}</a>`)}</p>`)
+              .join('')
+            try {
+              const html = buildPazEmailTemplate({
+                title: escapeHtml(subject),
+                eyebrow: 'PAZ Parent Masterclass',
+                intro: 'Your online session details are ready.',
+                bodyHtml: personalizedHtml,
+                ctaLabel: 'Join the Google Meet',
+                ctaUrl: meetLink,
+                showSecondaryCta: false,
+                footerNote: 'We look forward to seeing you at the masterclass.'
+              })
+              await sendResendEmail({
+                to: email,
+                subject,
+                html,
+                text: personalizedText,
+                from: process.env.RESEND_FROM_EMAIL || 'notifications@pazthrivingtribe.org'
+              })
+              return { email, sent: true }
+            } catch (sendError) {
+              console.error(`Masterclass Meet link email failed for ${email}:`, sendError)
+              return { email, sent: false, error: sendError?.message || 'Email delivery failed.' }
+            }
+          }))
+          for (const outcome of outcomes) {
+            if (outcome.sent) sent += 1
+            else failures.push({ email: outcome.email, error: outcome.error })
+          }
+        }
+
+        return jsonResponse(res, 200, { sent, failed: failures.length, failures, total: recipients.length })
+      } else if (action === 'list_masterclass_registrations') {
         const { data, error } = await supabase
           .from('masterclass_registrations')
           .select('id,registrant_name,email,phone,event_key,created_at')
