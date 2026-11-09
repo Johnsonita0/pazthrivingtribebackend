@@ -118,26 +118,20 @@ export default async function handler(req, res) {
     try {
       if (action === 'send_masterclass_meet_link') {
         const meetLink = String(requestBody?.meetLink || '').trim()
-        const subject = String(requestBody?.subject || '').trim()
-        const emailTemplate = String(requestBody?.emailTemplate || '').trim()
         let parsedMeetLink
         try {
           parsedMeetLink = new URL(meetLink)
         } catch {
           return jsonResponse(res, 400, { error: 'Enter a valid Google Meet link.' })
         }
-        if (parsedMeetLink.protocol !== 'https:' || parsedMeetLink.hostname !== 'meet.google.com' || parsedMeetLink.pathname === '/') {
+        if (parsedMeetLink.protocol !== 'https:' || parsedMeetLink.hostname !== 'meet.google.com' || parsedMeetLink.port || parsedMeetLink.pathname === '/') {
           return jsonResponse(res, 400, { error: 'The meeting link must be a valid https://meet.google.com/ link.' })
         }
-        if (!subject || subject.length > 200 || /[\r\n]/.test(subject)) {
-          return jsonResponse(res, 400, { error: 'The email subject must contain 1 to 200 characters.' })
+        if (parsedMeetLink.username || parsedMeetLink.password) {
+          return jsonResponse(res, 400, { error: 'The meeting link must not contain login credentials.' })
         }
-        if (!emailTemplate || emailTemplate.length > 5000) {
-          return jsonResponse(res, 400, { error: 'The email template must contain 1 to 5000 characters.' })
-        }
-        if (!emailTemplate.includes('{{name}}') || !emailTemplate.includes('{{meetLink}}')) {
-          return jsonResponse(res, 400, { error: 'Keep both {{name}} and {{meetLink}} in the email template.' })
-        }
+        const safeMeetLink = parsedMeetLink.toString()
+        const subject = 'Your PAZ Parent Masterclass link is here'
 
         const registrations = await getMasterclassRegistrations(supabase, 'registrant_name,email')
 
@@ -152,29 +146,42 @@ export default async function handler(req, res) {
         if (!recipients.length) return jsonResponse(res, 400, { error: 'There are no valid registrant email addresses to send to.' })
 
         let sent = 0
-        const failures = []
+        let failed = 0
         for (let index = 0; index < recipients.length; index += 5) {
           const batch = recipients.slice(index, index + 5)
           const outcomes = await Promise.all(batch.map(async ([email, name]) => {
-            const personalizedText = emailTemplate
-              .replace(/\{\{name\}\}/g, name)
-              .replace(/\{\{meetLink\}\}/g, meetLink)
-            const personalizedHtml = emailTemplate
-              .split(/\r?\n/)
-              .map((line) => `<p>${escapeHtml(line)
-                .replace(/\{\{name\}\}/g, escapeHtml(name))
-                .replace(/\{\{meetLink\}\}/g, `<a href="${escapeHtml(meetLink)}">${escapeHtml(meetLink)}</a>`)}</p>`)
-              .join('')
+            const safeName = escapeHtml(name || 'there')
+            const intro = `Hello ${safeName},`
+            const bodyHtml = [
+              '<p>Thank you for registering for our PAZ Parent Masterclass, “Getting Your Teenager to Speak to You.” We’re so glad you’ll be joining us.</p>',
+              '<p>We hope the session brings you practical ideas and fresh encouragement for having more open, meaningful conversations with your teen.</p>',
+              '<p>Join us at the scheduled time using the button below. If you need help getting into the session, simply reply to this email—we’ll be happy to help.</p>'
+            ].join('')
+            const personalizedText = [
+              `Hello ${name || 'there'},`,
+              '',
+              'Thank you for registering for our PAZ Parent Masterclass, “Getting Your Teenager to Speak to You.” We’re so glad you’ll be joining us.',
+              '',
+              'We hope the session brings you practical ideas and fresh encouragement for having more open, meaningful conversations with your teen.',
+              '',
+              'Join us at the scheduled time using this Google Meet link:',
+              safeMeetLink,
+              '',
+              'If you need help getting into the session, simply reply to this email—we’ll be happy to help.',
+              '',
+              'With warm wishes,',
+              'The PAZ Thriving Tribe Team'
+            ].join('\n')
             try {
               const html = buildPazEmailTemplate({
-                title: escapeHtml(subject),
+                title: 'We’re looking forward to seeing you',
                 eyebrow: 'PAZ Parent Masterclass',
-                intro: 'Your online session details are ready.',
-                bodyHtml: personalizedHtml,
-                ctaLabel: 'Join the Google Meet',
-                ctaUrl: meetLink,
+                intro,
+                bodyHtml,
+                ctaLabel: 'Join the masterclass on Google Meet',
+                ctaUrl: safeMeetLink,
                 showSecondaryCta: false,
-                footerNote: 'We look forward to seeing you at the masterclass.'
+                footerNote: 'We’re here to support your family’s growth journey.'
               })
               await sendResendEmail({
                 to: email,
@@ -186,16 +193,16 @@ export default async function handler(req, res) {
               return { email, sent: true }
             } catch (sendError) {
               console.error(`Masterclass Meet link email failed for ${email}:`, sendError)
-              return { email, sent: false, error: sendError?.message || 'Email delivery failed.' }
+              return { sent: false }
             }
           }))
           for (const outcome of outcomes) {
             if (outcome.sent) sent += 1
-            else failures.push({ email: outcome.email, error: outcome.error })
+            else failed += 1
           }
         }
 
-        return jsonResponse(res, 200, { sent, failed: failures.length, failures, total: recipients.length })
+        return jsonResponse(res, 200, { sent, failed, total: recipients.length })
       } else if (action === 'list_masterclass_registrations') {
         const data = await getMasterclassRegistrations(supabase, 'id,registrant_name,email,phone,event_key,created_at')
         return jsonResponse(res, 200, { data })
