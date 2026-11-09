@@ -44,6 +44,7 @@ import vendorProductChatHandler from './server-handlers/vendor-product-chat.js';
 import resendInboundHandler from './server-handlers/resend-inbound.js';
 import appDownloadHandler from './server-handlers/app-download.js';
 import r2StorageUploadHandler from './server-handlers/r2-storage-upload.js';
+import masterclassRegistrationEmailHandler from './server-handlers/masterclass-registration-email.js';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 
@@ -358,6 +359,12 @@ const server = http.createServer((req, res) => {
       if (pathname === '/api/send-registration-email' && req.method === 'POST') {
         req.body = body ? JSON.parse(body) : {};
         await sendRegistrationEmailHandler(req, res);
+        return;
+      }
+
+      if (pathname === '/api/send-masterclass-registration-email' && req.method === 'POST') {
+        req.body = body ? JSON.parse(body) : {};
+        await masterclassRegistrationEmailHandler(req, res);
         return;
       }
 

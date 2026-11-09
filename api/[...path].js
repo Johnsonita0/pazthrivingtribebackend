@@ -34,6 +34,7 @@ import productChatHandler from '../server-handlers/product-chat.js';
 import vendorProductChatHandler from '../server-handlers/vendor-product-chat.js';
 import appDownloadHandler from '../server-handlers/app-download.js';
 import r2StorageUploadHandler from '../server-handlers/r2-storage-upload.js';
+import masterclassRegistrationEmailHandler from '../server-handlers/masterclass-registration-email.js';
 
 const handlers = {
   '/app-download': appDownloadHandler,
@@ -71,6 +72,7 @@ const handlers = {
   '/resend-webhook': resendWebhookHandler,
   '/send-notification-email': sendNotificationEmailHandler,
   '/send-registration-email': sendRegistrationEmailHandler,
+  '/send-masterclass-registration-email': masterclassRegistrationEmailHandler,
   '/track-visitor': trackVisitorHandler,
   '/webhook': resendWebhookHandler
 };
