@@ -35,6 +35,23 @@ const escapeHtml = (value) => String(value || '')
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;')
 
+async function getMasterclassRegistrations(supabase, columns) {
+  const pageSize = 500
+  const registrations = []
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await supabase
+      .from('masterclass_registrations')
+      .select(columns)
+      .eq('event_key', 'parent-communication-2026-11-21')
+      .order('created_at', { ascending: false })
+      .range(offset, offset + pageSize - 1)
+    if (error) throw error
+    const page = data || []
+    registrations.push(...page)
+    if (page.length < pageSize) return registrations
+  }
+}
+
 export default async function handler(req, res) {
   const { supabaseUrl, serviceRoleKey, adminEmails, adminUserIds } = getEnv()
   if (req.method !== 'POST') return jsonResponse(res, 405, { error: 'Method not allowed' })
@@ -122,13 +139,7 @@ export default async function handler(req, res) {
           return jsonResponse(res, 400, { error: 'Keep both {{name}} and {{meetLink}} in the email template.' })
         }
 
-        const { data: registrations, error } = await supabase
-          .from('masterclass_registrations')
-          .select('registrant_name,email')
-          .eq('event_key', 'parent-communication-2026-11-21')
-          .order('created_at', { ascending: false })
-          .limit(500)
-        if (error) throw error
+        const registrations = await getMasterclassRegistrations(supabase, 'registrant_name,email')
 
         const recipientsByEmail = new Map()
         for (const registration of registrations || []) {
@@ -186,14 +197,8 @@ export default async function handler(req, res) {
 
         return jsonResponse(res, 200, { sent, failed: failures.length, failures, total: recipients.length })
       } else if (action === 'list_masterclass_registrations') {
-        const { data, error } = await supabase
-          .from('masterclass_registrations')
-          .select('id,registrant_name,email,phone,event_key,created_at')
-          .eq('event_key', 'parent-communication-2026-11-21')
-          .order('created_at', { ascending: false })
-          .limit(500)
-        if (error) throw error
-        return jsonResponse(res, 200, { data: data || [] })
+        const data = await getMasterclassRegistrations(supabase, 'id,registrant_name,email,phone,event_key,created_at')
+        return jsonResponse(res, 200, { data })
       } else if (action === 'save_footer_settings') {
         const values = requestBody?.payload
         if (!values || typeof values !== 'object' || Array.isArray(values)) {
