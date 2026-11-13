@@ -206,6 +206,21 @@ export default async function handler(req, res) {
       } else if (action === 'list_masterclass_registrations') {
         const data = await getMasterclassRegistrations(supabase, 'id,registrant_name,email,phone,event_key,created_at')
         return jsonResponse(res, 200, { data })
+      } else if (action === 'delete_masterclass_registration') {
+        const registrationId = String(requestBody?.registrationId || '').trim()
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(registrationId)) {
+          return jsonResponse(res, 400, { error: 'A valid participant ID is required.' })
+        }
+        const { data: deletedRegistration, error: deleteError } = await supabase
+          .from('masterclass_registrations')
+          .delete()
+          .eq('id', registrationId)
+          .eq('event_key', 'parent-communication-2026-11-21')
+          .select('id')
+          .maybeSingle()
+        if (deleteError) throw deleteError
+        if (!deletedRegistration) return jsonResponse(res, 404, { error: 'This participant was not found or has already been deleted.' })
+        return jsonResponse(res, 200, { deletedId: deletedRegistration.id })
       } else if (action === 'save_footer_settings') {
         const values = requestBody?.payload
         if (!values || typeof values !== 'object' || Array.isArray(values)) {
